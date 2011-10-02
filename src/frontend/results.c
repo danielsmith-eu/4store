@@ -32,6 +32,7 @@
 #include "filter.h"
 #include "debug.h"
 #include "../common/4s-hash.h"
+#include "../common/bit_arr.h"
 #include "../common/error.h"
 #include "../common/rdf-constants.h"
 #include "../common/4s-internals.h"

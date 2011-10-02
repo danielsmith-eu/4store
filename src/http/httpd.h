@@ -17,6 +17,7 @@
 
     Copyright 2006 Nick Lamb for Garlik.com
     Copyright 2010 Martin Galpin (CORS support)
+    Copyright 2011 Manuel Salvadores (ACL Graph Security)
  */
 
 typedef enum {
@@ -46,5 +47,6 @@ typedef struct {
   int soft_limit;
   char *output;
   unsigned int query_id;
-  double start_time;
+  double start_time;  
+  char *apikey;
 } client_ctxt;

@@ -331,7 +331,11 @@ static void tree_compact(fs_query *q)
     } while (done_something);
 }
 
-fs_query *fs_query_execute(fs_query_state *qs, fsp_link *link, raptor_uri *bu, const char *query, unsigned int flags, int opt_level, int soft_limit, int explain)
+fs_query *fs_query_execute(fs_query_state *qs, fsp_link *link, raptor_uri *bu, const char *query, unsigned int flags, int opt_level, int soft_limit, int explain) {
+    return fs_query_execute_acl(qs, link, bu, query, flags, opt_level, soft_limit, explain, NULL);
+}
+
+fs_query *fs_query_execute_acl(fs_query_state *qs, fsp_link *link, raptor_uri *bu, const char *query, unsigned int flags, int opt_level, int soft_limit, int explain, fs_rid_set *inv_acl)
 {
     if (!qs) {
         fs_error(LOG_CRIT, "fs_query_execute() handed NULL query state");
@@ -356,13 +360,15 @@ fs_query *fs_query_execute(fs_query_state *qs, fsp_link *link, raptor_uri *bu, c
         return NULL;
     }
 
-    fs_query *q = calloc(1, sizeof(fs_query));
+    fs_query *q = malloc(1 * sizeof(fs_query));
     if (getenv("SHOW_TIMING")) {
         q->start_time = fs_time();
     }
     q->rq = rq;
     q->qs = qs;
     q->opt_level = opt_level;
+    q->inv_acl = inv_acl;
+
     if (soft_limit) {
         q->soft_limit = soft_limit;
     } else {
@@ -981,6 +987,7 @@ int fs_query_process_pattern(fs_query *q, rasqal_graph_pattern *pattern, raptor_
 void fs_query_free(fs_query *q)
 {
     if (q) {
+        if (q->inv_acl) fs_rid_set_free(q->inv_acl);
         if (q->rq) {
             g_static_mutex_lock(&rasqal_mutex);
             rasqal_free_query(q->rq);

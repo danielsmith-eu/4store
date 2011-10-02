@@ -12,6 +12,7 @@
 struct _fs_query_state {
     fsp_link *link;
     fs_bind_cache *bind_cache;
+
     GHashTable *freq_s, *freq_o;
 
     /* mutex protecting the bind_cache */
@@ -41,6 +42,7 @@ struct _fs_query {
     fsp_link *link;
     fs_binding *bt;			/* main binding table, used in FILTER handling */
     fs_binding *bb[FS_MAX_BLOCKS];	/* per block binding table */
+    fs_rid_set *inv_acl; /* Graphs to be discarded in bind operation. Security layer. */
     int segments;
     int num_vars;			/* number of projected variables */
     int num_vars_total;			/* number of total variables */

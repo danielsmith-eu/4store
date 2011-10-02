@@ -15,6 +15,7 @@
     along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
     Copyright (C) 2007 Steve Harris for Garlik
+    Copyright (C) 2011 Manuel Salvadores (ACL Graph Security)
  */
 
 #include <stdio.h>
@@ -28,6 +29,7 @@
 #include "query-cache.h"
 #include "query-intl.h"
 #include "query-datatypes.h"
+#include "../common/bit_arr.h"
 #include "../common/4store.h"
 #include "../common/params.h"
 #include "../common/error.h"
@@ -46,10 +48,54 @@ struct _fs_bind_cache {
     fs_rid_vector *res[4];
 };
 
+
+int fs_mark_discard_rows(fs_rid_vector *m, fs_rid_set *inv_acl, unsigned char **discarded) {
+
+     int qdiscarded = 0;
+     unsigned char *allow_access = NULL;
+
+     if (inv_acl) {
+        int count = fs_rid_vector_length(m);
+                for (int i=0 ; i<count ; i++) {
+            fs_rid rid_m = m->data[i];
+            if (fs_rid_set_contains(inv_acl, rid_m)) {
+                if (!allow_access) allow_access = fs_new_bit_array(count);
+                fs_bit_array_set(allow_access,i,0);
+                qdiscarded++;
+            }
+        }
+        /*
+        fs_error(FS_ERROR, "fs_mark_discard_rows");
+        if (allow_access) {
+            for (int i=0;i<count;i++) {
+                printf("[%d]=%d   ",i, fs_bit_array_get(allow_access, i));
+            }
+        }
+        printf("\n");
+        fs_error(FS_ERROR, "fs_mark_discard_rows");
+      */
+      }
+    
+     if (allow_access)
+        *discarded = allow_access;
+
+     return qdiscarded;
+}
+
+int fs_slots_n(int f) {
+    int slots = 0;
+    if (f & FS_BIND_MODEL) slots++;
+    if (f & FS_BIND_SUBJECT) slots++;
+    if (f & FS_BIND_PREDICATE) slots++;
+    if (f & FS_BIND_OBJECT) slots++;
+    return slots;
+}
+
+
 /* calls bind as appropriate, plus checks in cache to see if results already
  * present */
 
-int fs_bind_cache_wrapper(fs_query_state *qs, fs_query *q, int all,
+int fs_bind_cache_wrapper_intl(fs_query_state *qs, fs_query *q, int all,
                 int flags, fs_rid_vector *rids[4],
                 fs_rid_vector ***result, int offset, int limit)
 {
@@ -59,11 +105,7 @@ int fs_bind_cache_wrapper(fs_query_state *qs, fs_query *q, int all,
     }
     g_static_mutex_unlock(&qs->cache_mutex);
 
-    int slots = 0;
-    if (flags & FS_BIND_MODEL) slots++;
-    if (flags & FS_BIND_SUBJECT) slots++;
-    if (flags & FS_BIND_PREDICATE) slots++;
-    if (flags & FS_BIND_OBJECT) slots++;
+    int slots = fs_slots_n(flags);
 
     /* check for no possible bindings */
     for (int s=0; s<4; s++) {
@@ -136,6 +178,9 @@ int fs_bind_cache_wrapper(fs_query_state *qs, fs_query *q, int all,
     } else {
         ret = fsp_bind_limit_many(qs->link, flags, rids[0], rids[1], rids[2], rids[3], result, offset, limit);
     }
+
+    /* filter out here based on inversed ACL */
+
     int limited = fsp_hit_limits(qs->link) - limited_before;
     if (ret) {
         fs_error(LOG_ERR, "bind failed in '%s', %d segments gave errors",
@@ -175,6 +220,47 @@ int fs_bind_cache_wrapper(fs_query_state *qs, fs_query *q, int all,
             }
         }
         g_static_mutex_unlock(&qs->cache_mutex);
+    }
+
+    return ret;
+}
+
+/* it implement basic graph ACL */
+int fs_bind_cache_wrapper(fs_query_state *qs, fs_query *q, int all,
+                int flags, fs_rid_vector *rids[4],
+                fs_rid_vector ***result, int offset, int limit) {
+   
+    int flags_copy = flags;
+    if (q && q->inv_acl) {
+        flags = flags | FS_BIND_MODEL;
+    }
+    int ret = fs_bind_cache_wrapper_intl(qs, q, all, flags, rids, result, offset, limit);
+    
+    if (q && q->inv_acl) {
+        unsigned char *rows_discarded = NULL;
+        int ndiscarded = fs_mark_discard_rows((*result)[0],q->inv_acl, &rows_discarded);
+        int slots = fs_slots_n(flags_copy);
+        if (!(flags_copy & FS_BIND_MODEL) && (flags & FS_BIND_MODEL)) {
+            fs_rid_vector **result_copy = calloc(slots, sizeof(fs_rid_vector));
+            for (int i=0;i<slots;i++)
+                result_copy = result[i+1];
+            fs_rid_vector_free((*result)[0]);
+            free(*result);
+            *result = result_copy;
+        }
+        if (ndiscarded) {
+            fs_rid_vector **rows = *result;
+            int count = fs_rid_vector_length(rows[0]);
+            int shifts = 0;
+            for (int i=0; i < count; i++) {
+                for (int s=0;s<slots;s++)
+                    rows[s]->data[i-shifts] = rows[s]->data[i];
+                if (!fs_bit_array_get(rows_discarded, i))
+                    shifts++;
+            }
+            for (int s=0;s<slots;s++)
+                rows[s]->length -= ndiscarded;
+        }
     }
 
     return ret;

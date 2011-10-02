@@ -18,6 +18,9 @@ int fs_query_fini(fs_query_state *qs);
 fs_query *fs_query_execute(fs_query_state *qs, fsp_link *link, raptor_uri *bu,
                            const char *query, unsigned int flags, int opt_level, int soft_limit, int explain);
 
+fs_query *fs_query_execute_acl(fs_query_state *qs, fsp_link *link, raptor_uri *bu,
+                           const char *query, unsigned int flags, int opt_level, int soft_limit, int explain, fs_rid_set *inv_acl);
+
 /* internal function used to process WHERE clauses */
 int fs_query_process_pattern(fs_query *q, rasqal_graph_pattern *pattern, raptor_sequence *vars);
 

@@ -17,6 +17,7 @@
 
     Copyright 2006 Nick Lamb for Garlik.com
     Copyright 2010 Martin Galpin (CORS support)
+    Copyright 2011 Manuel Salvadores (ACL Graph Security)
  */
 
 #define _GNU_SOURCE
@@ -40,6 +41,7 @@
 
 #include "4store-config.h"
 #include "../common/4store.h"
+#include "../common/4s-internals.h" /* fs_rid_hash/equal ... probably moved somewhere else */
 #include "../common/error.h"
 #include "../common/gnu-options.h"
 
@@ -83,6 +85,12 @@ static void http_put_finished(client_ctxt *ctxt, const char *msg);
 
 static FILE *ql_file = NULL;
 
+static GStaticMutex config_mutex = G_STATIC_MUTEX_INIT;
+static GHashTable *acl_graph_hash = NULL;
+static fs_rid_set *admin_users_set = NULL;
+static GKeyFile *sec_config_key_file = NULL;
+static char *config_filename=NULL;
+
 static pid_t cpid = 0;
 
 volatile static unsigned int last_query_id = 0;
@@ -90,6 +98,104 @@ volatile static unsigned int last_query_id = 0;
 /* set *set if the key value is set in kb_name, or default */
 static void set_boolean(GKeyFile *keyfile, const char *kb_name, const char *key, int *set);
 static void set_string(GKeyFile *keyfile, const char *kb_name, const char *key, const char **set);
+
+struct sec_tuple {
+  int set_size;
+  fs_rid_set *res;
+  fs_rid user_key;
+};
+
+void key_in(gpointer key, gpointer value, gpointer user_data) {
+  fs_rid *g = (fs_rid *)key;
+  struct sec_tuple *t = (struct sec_tuple *) user_data;
+  fs_rid_set *graph_keys = (fs_rid_set *)value;
+  if (!fs_rid_set_contains(graph_keys,t->user_key)) {
+     fs_rid_set_add(t->res,*g);
+     t->set_size++;
+  }
+}
+
+static int is_admin(fs_rid user_key) {
+  return fs_rid_set_contains(admin_users_set,user_key); 
+}
+
+static int is_admin_str(char *user_key) {
+  fs_rid k = fs_hash_literal(user_key,0);
+  return is_admin(k); 
+}
+
+/* not safe to call directly. use no_access_for_user_sync instead */
+static fs_rid_set *no_access_for_user(char *api_key) {
+  fs_rid user_key = fs_hash_literal(api_key,0);
+  if (is_admin(user_key))
+    return NULL;
+  fs_rid_set *res = fs_rid_set_new();
+  struct sec_tuple t = { .set_size = 0, .res = res, .user_key = user_key };
+
+  if (acl_graph_hash) {
+     g_hash_table_foreach(acl_graph_hash, key_in , &t);
+     if (t.set_size)
+       return res;
+     return NULL;
+  }
+  return NULL;
+}
+
+static fs_rid_set *no_access_for_user_sync(char *api_key) {
+  g_static_mutex_lock(&config_mutex); /* make sure conf doesn't change while checking */
+  fs_rid_set *r = no_access_for_user(api_key);
+  g_static_mutex_unlock(&config_mutex);
+  return r;
+}
+
+static fs_rid_set* rid_set_from_strlist(char **strlist,int n) {
+      fs_rid_set *set = fs_rid_set_new();
+      for (int j=0;j<n; j++) { 
+        fs_rid rid_key = fs_hash_literal(strlist[j],0);
+        fs_rid_set_add(set,rid_key);
+      }
+      return set; 
+}
+static void acl_key_file_load(const char *kb_name) {
+  // TODO change this access
+  if (kb_name)
+    config_filename = g_strdup_printf("/var/lib/4store/%s/acl-list.ini", kb_name);
+ 
+  if (acl_graph_hash) //TODO free also element inside hash ... keys and values.
+    g_hash_table_destroy(acl_graph_hash);
+
+  acl_graph_hash = g_hash_table_new(fs_rid_hash,fs_rid_equal);
+  if (g_file_test(config_filename, G_FILE_TEST_EXISTS)) {
+    sec_config_key_file = g_key_file_new();
+    GError *error = NULL;
+    g_key_file_load_from_file(sec_config_key_file, config_filename, G_KEY_FILE_KEEP_COMMENTS, &error);
+    if (error) {
+      fs_error(LOG_ERR, "Error parsing ACL file '%s'", config_filename); 
+    } else {
+      gsize ngraph = 0;
+      gchar **graphs = g_key_file_get_keys(sec_config_key_file,"ACL",&ngraph,&error);
+      for (int i=0; i < ngraph; i++) {
+        fs_rid *rid_graph = malloc(sizeof(fs_rid));
+        *rid_graph = fs_hash_uri(graphs[i]);
+        gsize nkeys = 0;
+        char **keys = g_key_file_get_string_list(sec_config_key_file,"ACL",graphs[i],&nkeys,&error);
+        fs_rid_set *set_keys = rid_set_from_strlist(keys,nkeys);
+        g_hash_table_insert(acl_graph_hash,rid_graph,set_keys);
+      }
+
+      error = NULL;
+      gsize nkeys = 0;
+      char **keys = g_key_file_get_string_list(sec_config_key_file,"ADMIN","admin_users",&nkeys,&error);
+      if (admin_users_set)
+        fs_rid_set_free(admin_users_set);
+      admin_users_set = rid_set_from_strlist(keys,nkeys);
+      fs_error(LOG_INFO, "ACL file parsed. Graph security in place.");
+      //g_key_file_free(sec_config_key_file);
+    }
+  } else {
+    fs_error(LOG_WARNING, "ACL init not parsed. File '%s' not found.", config_filename);
+  }
+}
 
 static void query_log_open (const char *kb_name)
 {
@@ -336,7 +442,11 @@ static void http_query_worker(gpointer data, gpointer user_data)
   client_ctxt *ctxt = (client_ctxt *) data;
 
   ctxt->start_time = fs_time();
-  ctxt->qr = fs_query_execute(query_state, fsplink, bu, ctxt->query_string, ctxt->query_flags, opt_level, ctxt->soft_limit, 0);
+  fs_rid_set *inv_acl=NULL;
+  if (ctxt->apikey) {
+    inv_acl = no_access_for_user_sync(ctxt->apikey);
+  }
+  ctxt->qr = fs_query_execute_acl(query_state, fsplink, bu, ctxt->query_string, ctxt->query_flags, opt_level, ctxt->soft_limit, 0, inv_acl);
   if (ctxt->qr->errors) {
     http_error(ctxt, "400 Parser error");
     GSList *w = ctxt->qr->warnings;
@@ -891,7 +1001,6 @@ static void http_query_widget(client_ctxt *ctxt)
 static void http_get_request(client_ctxt *ctxt, gchar *url, gchar *protocol)
 {
   char *default_graph = NULL; /* ignored for now */
-
   char *qm = strchr(url, '?');
   char *qs = qm ? qm + 1 : NULL;
   if (qs) {
@@ -933,6 +1042,9 @@ static void http_get_request(client_ctxt *ctxt, gchar *url, gchar *protocol)
       } else if (!strcmp(key, "default-graph-uri") && value) {
         url_decode(value);
         default_graph = value;
+      } else if (!strcmp(key, "apikey") && value) {
+        url_decode(value);
+        ctxt->apikey = value;
       }
       qs = next;
     }
@@ -1062,6 +1174,9 @@ static void http_post_request(client_ctxt *ctxt, gchar *url, gchar *protocol)
       } else if (!strcmp(key, "default-graph-uri") && value) {
         url_decode(value);
         default_graph = value;
+      } else if (!strcmp(key, "apikey") && value) {
+        url_decode(value);
+        ctxt->apikey = value;
       }
       qs = next;
     }
@@ -1215,6 +1330,107 @@ static void http_post_request(client_ctxt *ctxt, gchar *url, gchar *protocol)
     } else {
       http_error(ctxt, "500 SPARQL REST protocol error");
       http_close(ctxt);
+    }
+    g_free(form);
+  } else if (!strcmp(url, "/configacl/")) {
+
+    /* TODO: refactor this copy and paste from previous if-branch */
+    char *form_type = just_content_type(ctxt);
+    if (!form_type || strcasecmp(form_type, "application/x-www-form-urlencoded")) {
+      http_error(ctxt, "400 4store only implements application/x-www-form-urlencoded");
+      http_close(ctxt);
+      g_free(form_type);
+      return;
+    }
+    g_free(form_type);
+
+    const char *length = g_hash_table_lookup(ctxt->headers, "content-length");
+    ctxt->bytes_left = length ? atol(length) : 0;
+
+    if (ctxt->bytes_left == 0) {
+      http_error(ctxt, "411 content length required");
+      http_close(ctxt);
+      return;
+    }
+
+    /* FIXME this could block almost indefinitely */
+    gchar *form = g_malloc0(ctxt->bytes_left + 1);
+    gchar *buffer = form;
+
+    for (gsize read = 0; ctxt->bytes_left > 0; buffer += read, ctxt->bytes_left -= read) {
+      GIOStatus result;
+      do {
+        result = g_io_channel_read_chars(ctxt->ioch, buffer, ctxt->bytes_left, &read, NULL);
+      } while (result == G_IO_STATUS_AGAIN);
+      if (result !=  G_IO_STATUS_NORMAL) {
+        fs_error(LOG_ERR, "unexpected IO status %u during POST request", result);
+        g_free(form);
+        http_error(ctxt, "500 SPARQL REST server error");
+        http_close(ctxt);
+        return;
+      }
+    }
+    /* end TODO refactor */
+
+    char *config_content=NULL;
+    char *apikey=NULL;
+
+    char *qs = form;
+    while (qs) {
+      char *ampersand = strchr(qs, '&');
+      char *next = ampersand ? ampersand + 1 : NULL;
+      if (next) {
+        *ampersand = '\0';
+      }
+      char *key = qs;
+      char *equals = strchr(qs, '=');
+      char *value = equals ? equals + 1 : NULL;
+      if (equals) {
+        *equals = '\0';
+      }
+      url_decode(key);
+      if (!strcmp(key, "config-content") && value) {
+        url_decode(value);
+        config_content = value;
+      } else if (!strcmp(key, "apikey") && value) {
+        url_decode(value);
+        apikey = value;
+      }
+      qs = next;
+    }
+    if (!apikey || !is_admin_str(apikey)) {
+      http_error(ctxt, "403 forbidden - no rights to change config.");
+      http_close(ctxt);
+    } else if (!config_content) {
+        http_error(ctxt, "400 Bad request, config content is missing");
+        http_close(ctxt);
+    } else {
+        /* make sure the file is parseable */
+        GKeyFile *tmp_k = g_key_file_new();
+        gsize n = strlen(config_content);
+        GError *error=NULL;
+        gboolean parsed = g_key_file_load_from_data(tmp_k,config_content,n,G_KEY_FILE_KEEP_COMMENTS,&error);
+        if (!parsed) {
+          if (error) {
+            gchar *m = g_strdup_printf("400 Bad request config data not parseable [%s].",error->message);
+            http_error(ctxt, m);
+            g_free(m);
+          }
+          else
+            http_error(ctxt, "400 Bad request config data not parseable.");
+          http_close(ctxt);
+        } else {
+          g_static_mutex_lock(&config_mutex);
+          FILE *config_out = fopen(config_filename ,"w");
+          fputs(config_content,config_out);
+          fclose(config_out);
+          fs_error(LOG_INFO,"Writting config file %s",config_filename);
+          g_key_file_free(sec_config_key_file);
+          acl_key_file_load(NULL);
+          g_static_mutex_unlock(&config_mutex);
+          http_code(ctxt, "200 config modified successfully");
+          http_close(ctxt);
+        }
     }
     g_free(form);
   } else {
@@ -1656,6 +1872,7 @@ static void child (int srv, char *kb_name, char *password)
   has_o_index = !(strstr(features, "no-o-index")); /* tweak */
 
   query_log_open(kb_name);
+  acl_key_file_load(kb_name);
 
   query_state = fs_query_init(fsplink, NULL, NULL);
   bu = raptor_new_uri(query_state->raptor_world, (unsigned char *)"local:local");

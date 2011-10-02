@@ -261,6 +261,7 @@ static int update_op(struct update_context *uc)
 
         fs_query *q = calloc(1, sizeof(fs_query));
         uc->q = q;
+        q->inv_acl = NULL;
         q->qs = uc->qs;
         q->rq = uc->rq;
         q->flags = FS_BIND_DISTINCT;
