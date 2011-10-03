@@ -231,20 +231,20 @@ int fs_bind_cache_wrapper(fs_query_state *qs, fs_query *q, int all,
                 fs_rid_vector ***result, int offset, int limit) {
    
     int flags_copy = flags;
+    int ndiscarded = 0;
     if (q && q->inv_acl) {
         flags = flags | FS_BIND_MODEL;
     }
     int ret = fs_bind_cache_wrapper_intl(qs, q, all, flags, rids, result, offset, limit);
-    
     if (q && q->inv_acl) {
         unsigned char *rows_discarded = NULL;
         /* TODO probably this can be done with one iteration of results */
-        int ndiscarded = fs_mark_discard_rows((*result)[0],q->inv_acl, &rows_discarded);
+        ndiscarded = fs_mark_discard_rows((*result)[0],q->inv_acl, &rows_discarded);
         int slots = fs_slots_n(flags_copy);
         if (!(flags_copy & FS_BIND_MODEL) && (flags & FS_BIND_MODEL)) {
             fs_rid_vector **result_copy = calloc(slots, sizeof(fs_rid_vector));
             for (int i=0;i<slots;i++)
-                result_copy = result[i+1];
+                result_copy[i] = (*result)[i+1];
             fs_rid_vector_free((*result)[0]);
             free(*result);
             *result = result_copy;
@@ -259,12 +259,13 @@ int fs_bind_cache_wrapper(fs_query_state *qs, fs_query *q, int all,
                 if (!fs_bit_array_get(rows_discarded, i))
                     shifts++;
             }
-            for (int s=0;s<slots;s++)
+            for (int s=0;s<slots;s++) {
                 rows[s]->length -= ndiscarded;
+            }
         }
     }
 
-    return ret;
+    return ret - ndiscarded;
 }
 
 int fs_query_cache_flush(fs_query_state *qs, int verbosity)
