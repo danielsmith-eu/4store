@@ -713,7 +713,7 @@ int fs_add(struct update_context *uc, char *from, char *to)
     /* search for all the triples in from */
     fs_rid_vector **results;
     fs_rid_vector *slot[4] = { mvec, empty, empty, empty };
-    fs_bind_cache_wrapper(uc->qs, NULL, 1, FS_BIND_BY_SUBJECT | FS_BIND_SUBJECT | FS_BIND_PREDICATE | FS_BIND_OBJECT,
+    fs_bind_cache_wrapper_intl(uc->qs, NULL, 1, FS_BIND_BY_SUBJECT | FS_BIND_SUBJECT | FS_BIND_PREDICATE | FS_BIND_OBJECT,
              slot, &results, -1, -1);
     fs_rid_vector_free(mvec);
     fs_rid_vector_free(empty);
@@ -793,7 +793,7 @@ int fs_move(struct update_context *uc, char *from, char *to)
     fs_rid_vector *slot[4] = { mvec, empty, empty, empty };
 
     /* see if there's any data in <from> */
-    fs_bind_cache_wrapper(uc->qs, NULL, 1, FS_BIND_BY_SUBJECT | FS_BIND_SUBJECT,
+    fs_bind_cache_wrapper_intl(uc->qs, NULL, 1, FS_BIND_BY_SUBJECT | FS_BIND_SUBJECT,
              slot, &results, -1, 1);
     if (!results || results[0]->length == 0) {
         if (results) {
@@ -811,7 +811,7 @@ int fs_move(struct update_context *uc, char *from, char *to)
     free(results);
 
     /* get the contents of <from> */
-    fs_bind_cache_wrapper(uc->qs, NULL, 1, FS_BIND_BY_SUBJECT | FS_BIND_SUBJECT | FS_BIND_PREDICATE | FS_BIND_OBJECT,
+    fs_bind_cache_wrapper_intl(uc->qs, NULL, 1, FS_BIND_BY_SUBJECT | FS_BIND_SUBJECT | FS_BIND_PREDICATE | FS_BIND_OBJECT,
              slot, &results, -1, -1);
 
     /* delete <to> */
@@ -891,7 +891,7 @@ int fs_copy(struct update_context *uc, char *from, char *to)
     fs_rid_vector *slot[4] = { mvec, empty, empty, empty };
 
     /* see if there's any data in <from> */
-    fs_bind_cache_wrapper(uc->qs, NULL, 1, FS_BIND_BY_SUBJECT | FS_BIND_SUBJECT,
+    fs_bind_cache_wrapper_intl(uc->qs, NULL, 1, FS_BIND_BY_SUBJECT | FS_BIND_SUBJECT,
              slot, &results, -1, 1);
     if (!results || results[0]->length == 0) {
         if (results) {
@@ -909,7 +909,7 @@ int fs_copy(struct update_context *uc, char *from, char *to)
     free(results);
 
     /* get the contents of <from> */
-    fs_bind_cache_wrapper(uc->qs, NULL, 1, FS_BIND_BY_SUBJECT | FS_BIND_SUBJECT | FS_BIND_PREDICATE | FS_BIND_OBJECT,
+    fs_bind_cache_wrapper_intl(uc->qs, NULL, 1, FS_BIND_BY_SUBJECT | FS_BIND_SUBJECT | FS_BIND_PREDICATE | FS_BIND_OBJECT,
              slot, &results, -1, -1);
 
     /* map old bnodes to new ones */

@@ -9,6 +9,10 @@ int fs_bind_cache_wrapper(fs_query_state *qs, fs_query *q, int all,
     int flags, fs_rid_vector *rids[4], fs_rid_vector ***result,
     int offset, int limit);
 
+int fs_bind_cache_wrapper_intl(fs_query_state *qs, fs_query *q, int all,
+    int flags, fs_rid_vector *rids[4], fs_rid_vector ***result,
+    int offset, int limit);
+
 int fs_query_cache_flush(fs_query_state *qs, int verbosity);
 
 #endif

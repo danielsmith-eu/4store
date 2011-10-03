@@ -238,6 +238,7 @@ int fs_bind_cache_wrapper(fs_query_state *qs, fs_query *q, int all,
     
     if (q && q->inv_acl) {
         unsigned char *rows_discarded = NULL;
+        /* TODO probably this can be done with one iteration of results */
         int ndiscarded = fs_mark_discard_rows((*result)[0],q->inv_acl, &rows_discarded);
         int slots = fs_slots_n(flags_copy);
         if (!(flags_copy & FS_BIND_MODEL) && (flags & FS_BIND_MODEL)) {
