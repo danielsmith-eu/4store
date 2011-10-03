@@ -360,7 +360,7 @@ fs_query *fs_query_execute_acl(fs_query_state *qs, fsp_link *link, raptor_uri *b
         return NULL;
     }
 
-    fs_query *q = malloc(1 * sizeof(fs_query));
+    fs_query *q = calloc(1 , sizeof(fs_query));
     if (getenv("SHOW_TIMING")) {
         q->start_time = fs_time();
     }
