@@ -445,7 +445,15 @@ static void http_query_worker(gpointer data, gpointer user_data)
   fs_rid_set *inv_acl=NULL;
   if (ctxt->apikey) {
     inv_acl = no_access_for_user_sync(ctxt->apikey);
+  } else {
+    /* make this configurable */
+    if (acl_graph_hash && g_hash_table_size(acl_graph_hash)) {
+      http_error(ctxt, "403 forbidden - provide a valid apikey");
+      http_close(ctxt);
+      return;
+    }
   }
+
   ctxt->qr = fs_query_execute_acl(query_state, fsplink, bu, ctxt->query_string, ctxt->query_flags, opt_level, ctxt->soft_limit, 0, inv_acl);
   if (ctxt->qr->errors) {
     http_error(ctxt, "400 Parser error");
