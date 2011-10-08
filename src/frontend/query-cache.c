@@ -229,7 +229,17 @@ int fs_bind_cache_wrapper_intl(fs_query_state *qs, fs_query *q, int all,
 int fs_bind_cache_wrapper(fs_query_state *qs, fs_query *q, int all,
                 int flags, fs_rid_vector *rids[4],
                 fs_rid_vector ***result, int offset, int limit) {
-   
+
+    //if (q->restrict_spo) {
+       /* int vars=0;
+        for (int i=1;i<4;i++) {
+            if (!rids[i] || !rids[i]->length) vars++;
+            else if(rids[i]->length == 1 && rids[i]->data[0] == FS_RID_NULL)  vars++;
+        }
+        int bind_graph = rids[0] && !rids[0]->length && !(rids[0]->length == 1 && rids[0]->data[0] == FS_RID_NULL);
+
+        fs_error(LOG_ERR,"VARS %d %d %d",vars,bind_graph,rids[0]->length); */
+    //}
     int flags_copy = flags;
     int ndiscarded = 0;
     if (q && q->inv_acl) {

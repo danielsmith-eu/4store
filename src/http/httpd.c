@@ -456,7 +456,10 @@ static void http_query_worker(gpointer data, gpointer user_data)
 
   ctxt->qr = fs_query_execute_acl(query_state, fsplink, bu, ctxt->query_string, ctxt->query_flags, opt_level, ctxt->soft_limit, 0, inv_acl);
   if (ctxt->qr->errors) {
-    http_error(ctxt, "400 Parser error");
+    if (ctxt->qr->errors == -5)
+      http_error(ctxt, "400 Invalid query");
+    else
+      http_error(ctxt, "400 Parser error");
     GSList *w = ctxt->qr->warnings;
     if (w) {
        http_send(ctxt, "\n");

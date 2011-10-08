@@ -29,6 +29,7 @@
 #include "4store-config.h"
 #include "query.h"
 #include "query-intl.h"
+#include "query-checks.h"
 #include "query-datatypes.h"
 #include "query-cache.h"
 #include "optimiser.h"
@@ -379,6 +380,14 @@ fs_query *fs_query_execute_acl(fs_query_state *qs, fsp_link *link, raptor_uri *b
     g_static_mutex_lock(&rasqal_mutex);
     int ret = rasqal_query_prepare(rq, (unsigned char *)query, bu);
     g_static_mutex_unlock(&rasqal_mutex);
+    
+    int fail_check = fs_check_query_forbiden(rq);
+    if (fail_check) {
+        q->errors=-5;
+        q->warnings = g_slist_prepend(q->warnings, "This SPARQL Endpoint doesn't support (?s ?p ?o) in unbound graphs or regex expressions. Contact administrator for more information");
+        return q; 
+    }
+
     if (ret) {
 	return q;
     }
