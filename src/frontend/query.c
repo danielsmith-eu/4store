@@ -333,10 +333,10 @@ static void tree_compact(fs_query *q)
 }
 
 fs_query *fs_query_execute(fs_query_state *qs, fsp_link *link, raptor_uri *bu, const char *query, unsigned int flags, int opt_level, int soft_limit, int explain) {
-    return fs_query_execute_acl(qs, link, bu, query, flags, opt_level, soft_limit, explain, NULL);
+    return fs_query_execute_acl(qs, link, bu, query, flags, opt_level, soft_limit, explain, NULL, 0);
 }
 
-fs_query *fs_query_execute_acl(fs_query_state *qs, fsp_link *link, raptor_uri *bu, const char *query, unsigned int flags, int opt_level, int soft_limit, int explain, fs_rid_set *inv_acl)
+fs_query *fs_query_execute_acl(fs_query_state *qs, fsp_link *link, raptor_uri *bu, const char *query, unsigned int flags, int opt_level, int soft_limit, int explain, fs_rid_set *inv_acl, int query_restrictions)
 {
     if (!qs) {
         fs_error(LOG_CRIT, "fs_query_execute() handed NULL query state");
@@ -380,14 +380,15 @@ fs_query *fs_query_execute_acl(fs_query_state *qs, fsp_link *link, raptor_uri *b
     g_static_mutex_lock(&rasqal_mutex);
     int ret = rasqal_query_prepare(rq, (unsigned char *)query, bu);
     g_static_mutex_unlock(&rasqal_mutex);
-    
-    int fail_check = fs_check_query_forbiden(rq);
-    if (fail_check) {
-        q->errors=-5;
-        q->warnings = g_slist_prepend(q->warnings, "This SPARQL Endpoint doesn't support (?s ?p ?o) in unbound graphs or regex expressions. Contact administrator for more information");
-        return q; 
+   
+    if (query_restrictions) {
+        int fail_check = fs_check_query_forbiden(rq);
+        if (fail_check) {
+            q->errors=-5;
+            q->warnings = g_slist_prepend(q->warnings, "This SPARQL Endpoint doesn't support (?s ?p ?o) in unbound graphs or regex expressions. Contact administrator for more information");
+            return q; 
+        }
     }
-
     if (ret) {
 	return q;
     }

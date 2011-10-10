@@ -90,6 +90,7 @@ static GHashTable *acl_graph_hash = NULL;
 static fs_rid_set *admin_users_set = NULL;
 static GKeyFile *sec_config_key_file = NULL;
 static char *config_filename=NULL;
+static int query_restrictions=0;
 
 static pid_t cpid = 0;
 
@@ -188,9 +189,10 @@ static void acl_key_file_load(const char *kb_name) {
       char **keys = g_key_file_get_string_list(sec_config_key_file,"ADMIN","admin_users",&nkeys,&error);
       if (admin_users_set)
         fs_rid_set_free(admin_users_set);
+      query_restrictions = g_key_file_get_boolean(sec_config_key_file,"ADMIN","query_restriction",&error);
+      fs_error(LOG_INFO, "Query restrictions set to %d",query_restrictions);
       admin_users_set = rid_set_from_strlist(keys,nkeys);
       fs_error(LOG_INFO, "ACL file parsed. Graph security in place.");
-      //g_key_file_free(sec_config_key_file);
     }
   } else {
     fs_error(LOG_WARNING, "ACL init not parsed. File '%s' not found.", config_filename);
@@ -454,7 +456,8 @@ static void http_query_worker(gpointer data, gpointer user_data)
     }
   }
 
-  ctxt->qr = fs_query_execute_acl(query_state, fsplink, bu, ctxt->query_string, ctxt->query_flags, opt_level, ctxt->soft_limit, 0, inv_acl);
+  ctxt->qr = fs_query_execute_acl(query_state, fsplink, bu, ctxt->query_string, ctxt->query_flags, 
+                                  opt_level, ctxt->soft_limit, 0, inv_acl, query_restrictions);
   if (ctxt->qr->errors) {
     if (ctxt->qr->errors == -5)
       http_error(ctxt, "400 Invalid query");
