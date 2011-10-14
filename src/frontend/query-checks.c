@@ -29,6 +29,25 @@
 #include "../common/4store.h"
 #include "../common/error.h"
 
+/* 
+These set of functions are here to disable the execution of very very expensive queries via httpd:
+IF via config file query_restriction=1 then queries like the following are rejected:
+
+SELECT * WHERE { ?s ?p ?o }
+SELECT * WHERE { GRAPH ?g { ?s ?p ?o } }
+
+These two exeptions are accepted:
+
+SELECT DISTINCT ?p WHERE { ?s ?p ?o }
+SELECT DISTINCT ?g WHERE { GRAPH ?g { ?s ?p ?o } }
+
+Queries with vars at SPO and bound graph are accepted, i.e:
+
+SELECT * WHERE { GRAPH <G> { ?s ?p ?o } }
+
+Queries with REGEX are rejected.
+
+*/
 
 static int is_open_triple(rasqal_triple *t,rasqal_literal *model) {
     return t->subject->type == RASQAL_LITERAL_VARIABLE &&

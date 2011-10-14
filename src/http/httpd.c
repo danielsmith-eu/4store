@@ -445,7 +445,7 @@ static void http_query_worker(gpointer data, gpointer user_data)
 
   ctxt->start_time = fs_time();
   fs_rid_set *inv_acl=NULL;
-  if (ctxt->apikey) {
+  if (ctxt->apikey && acl_graph_hash && admin_users_set) {
     inv_acl = no_access_for_user_sync(ctxt->apikey);
   } else {
     /* make this configurable */
